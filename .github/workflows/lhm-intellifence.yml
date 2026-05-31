@@ -1,13 +1,5 @@
 name: LHM Intelligence Bot
 
-# Robô autônomo da LHM. Roda na nuvem do GitHub (internet liberada),
-# puxa dados reais e entrega no Telegram. Funciona com o PC desligado.
-#
-# Horários em UTC (Brasília = UTC-3):
-#   0 11 * * *  -> 08:00 BRT, todo dia   (Briefing Matinal)
-#   0 10 * * 1  -> 07:00 BRT, segunda    (Radar de Cidades & Concorrência)
-#   0 20 * * 5  -> 17:00 BRT, sexta      (Raio-X de Performance)
-
 on:
   schedule:
     - cron: "0 11 * * *"
@@ -46,6 +38,7 @@ jobs:
       - name: Rodar o LHM Intelligence Bot
         env:
           MODE: ${{ steps.mode.outputs.mode }}
+          CHANNEL: "telegram"
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WINDSOR_KEY_ADS: ${{ secrets.WINDSOR_KEY_ADS }}
