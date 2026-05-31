@@ -1,10 +1,21 @@
 name: LHM Intelligence Bot
 
+# Robô autônomo da LHM. Roda na nuvem do GitHub (internet liberada),
+# puxa dados reais e entrega no Telegram. Funciona com o PC desligado.
+#
+# Horários em UTC (Brasília = UTC-3):
+#   9 11 * * *  -> 08:09 BRT, todo dia   (Briefing Matinal)
+#   9 10 * * 1  -> 07:09 BRT, segunda    (Radar de Cidades & Concorrência)
+#   9 20 * * 5  -> 17:09 BRT, sexta      (Raio-X de Performance)
+# IMPORTANTE: minuto fora do ":00" de propósito. O GitHub atrasa/descarta
+# tarefas agendadas que caem na "hora cheia" (todo mundo agenda 0 min). Sair
+# do :00 reduz muito a chance de o agendamento não rodar.
+
 on:
   schedule:
-    - cron: "0 11 * * *"
-    - cron: "0 10 * * 1"
-    - cron: "0 20 * * 5"
+    - cron: "9 11 * * *"
+    - cron: "9 10 * * 1"
+    - cron: "9 20 * * 5"
   workflow_dispatch:
     inputs:
       mode:
@@ -26,8 +37,8 @@ jobs:
         run: |
           MODE="briefing"
           case "${{ github.event.schedule }}" in
-            "0 10 * * 1") MODE="radar" ;;
-            "0 20 * * 5") MODE="raiox" ;;
+            "9 10 * * 1") MODE="radar" ;;
+            "9 20 * * 5") MODE="raiox" ;;
           esac
           if [ -n "${{ github.event.inputs.mode }}" ]; then
             MODE="${{ github.event.inputs.mode }}"
