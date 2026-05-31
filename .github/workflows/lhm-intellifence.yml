@@ -8,6 +8,7 @@ name: LHM Intelligence Bot
 #   9 10 * * 1  -> 07:09 BRT, segunda    (Radar de Cidades & Concorrência)
 #   9 13 * * 3  -> 10:09 BRT, quarta     (Raio-X de Palavras-Chave / SEO)
 #   9 20 * * 5  -> 17:09 BRT, sexta      (Raio-X de Performance)
+#   9 21 * * 0  -> 18:09 BRT, domingo    (Direcao da Semana / Chefe consolidador)
 # IMPORTANTE: minuto fora do ":00" de propósito. O GitHub atrasa/descarta
 # tarefas agendadas que caem na "hora cheia" (todo mundo agenda 0 min). Sair
 # do :00 reduz muito a chance de o agendamento não rodar.
@@ -18,10 +19,11 @@ on:
     - cron: "9 10 * * 1"
     - cron: "9 13 * * 3"
     - cron: "9 20 * * 5"
+    - cron: "9 21 * * 0"
   workflow_dispatch:
     inputs:
       mode:
-        description: "Modo para teste manual (briefing, radar ou raiox)"
+        description: "Modo manual: briefing, radar, seo, raiox ou chefe"
         default: "briefing"
 
 jobs:
@@ -42,6 +44,7 @@ jobs:
             "9 10 * * 1") MODE="radar" ;;
             "9 13 * * 3") MODE="seo" ;;
             "9 20 * * 5") MODE="raiox" ;;
+            "9 21 * * 0") MODE="chefe" ;;
           esac
           if [ -n "${{ github.event.inputs.mode }}" ]; then
             MODE="${{ github.event.inputs.mode }}"
