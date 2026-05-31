@@ -6,6 +6,7 @@ name: LHM Intelligence Bot
 # Horários em UTC (Brasília = UTC-3):
 #   9 11 * * *  -> 08:09 BRT, todo dia   (Briefing Matinal)
 #   9 10 * * 1  -> 07:09 BRT, segunda    (Radar de Cidades & Concorrência)
+#   9 13 * * 3  -> 10:09 BRT, quarta     (Raio-X de Palavras-Chave / SEO)
 #   9 20 * * 5  -> 17:09 BRT, sexta      (Raio-X de Performance)
 # IMPORTANTE: minuto fora do ":00" de propósito. O GitHub atrasa/descarta
 # tarefas agendadas que caem na "hora cheia" (todo mundo agenda 0 min). Sair
@@ -15,6 +16,7 @@ on:
   schedule:
     - cron: "9 11 * * *"
     - cron: "9 10 * * 1"
+    - cron: "9 13 * * 3"
     - cron: "9 20 * * 5"
   workflow_dispatch:
     inputs:
@@ -38,6 +40,7 @@ jobs:
           MODE="briefing"
           case "${{ github.event.schedule }}" in
             "9 10 * * 1") MODE="radar" ;;
+            "9 13 * * 3") MODE="seo" ;;
             "9 20 * * 5") MODE="raiox" ;;
           esac
           if [ -n "${{ github.event.inputs.mode }}" ]; then
