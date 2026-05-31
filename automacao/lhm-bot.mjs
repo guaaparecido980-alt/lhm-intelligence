@@ -1,33 +1,45 @@
 // =============================================================================
-//  LHM Intelligence Bot — robô autônomo (GitHub Actions → Telegram)
+//  LHM Intelligence Bot — robô autônomo (GitHub Actions → WhatsApp)
 // -----------------------------------------------------------------------------
 //  Roda na nuvem do GitHub (internet liberada), puxa dados REAIS de marketing
 //  (Instagram, Meta Ads e Google Analytics do site) e entrega um relatório
-//  no Telegram do dono. Funciona mesmo com o PC desligado.
+//  no WhatsApp do dono via CallMeBot. Funciona mesmo com o PC desligado.
 //
 //  Modos (variável de ambiente MODE):
 //    briefing  → relatório matinal diário
 //    radar     → cidades quentes & concorrência (semanal)
 //    raiox     → raio-x de performance (semanal)
 //
-//  Segredos lidos do ambiente (configurados como GitHub Secrets):
-//    TELEGRAM_TOKEN     token do bot @Lhm_intelligence_bot
-//    TELEGRAM_CHAT_ID   chat_id do dono
+//  Segredos lidos do ambiente (GitHub Secrets):
 //    WINDSOR_KEY_ADS    chave Windsor com Instagram + Meta Ads
 //    WINDSOR_KEY_GA     chave Windsor com Google Analytics do site
-//    ANTHROPIC_API_KEY  (OPCIONAL) liga a IA que escreve o texto e pesquisa
+//    ANTHROPIC_API_KEY  (OPCIONAL) liga a IA que escreve o texto
+//  Entrega no WhatsApp (CallMeBot) já vem configurada por padrão.
 // =============================================================================
 
 const MODE = (process.env.MODE || "briefing").trim();
 
+// Canal de entrega: "whatsapp" (padrão) ou "telegram".
+const CHANNEL = (process.env.CHANNEL || "whatsapp").trim().toLowerCase();
+
+// WhatsApp via CallMeBot (funciona no GitHub Actions, que tem internet liberada).
+const CALLMEBOT_PHONE = process.env.CALLMEBOT_PHONE || "554195374510";
+const CALLMEBOT_APIKEY = process.env.CALLMEBOT_APIKEY || "5122161";
+
+// Telegram (opcional, só se CHANNEL=telegram).
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
 const WINDSOR_KEY_ADS = process.env.WINDSOR_KEY_ADS;
 const WINDSOR_KEY_GA = process.env.WINDSOR_KEY_GA;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
-  console.error("Faltam TELEGRAM_TOKEN ou TELEGRAM_CHAT_ID. Abortando.");
+if (CHANNEL === "telegram" && (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID)) {
+  console.error("Canal telegram exige TELEGRAM_TOKEN e TELEGRAM_CHAT_ID. Abortando.");
+  process.exit(1);
+}
+if (CHANNEL === "whatsapp" && (!CALLMEBOT_PHONE || !CALLMEBOT_APIKEY)) {
+  console.error("Canal whatsapp exige CALLMEBOT_PHONE e CALLMEBOT_APIKEY. Abortando.");
   process.exit(1);
 }
 
@@ -161,7 +173,7 @@ function dossie({ ig, ads, site }) {
 
 const SYSTEM = `Você é o estrategista de marketing da LHM Engenharia — construtora premium de Curitiba e do Litoral do Paraná (Caiobá, Guaratuba, Matinhos), especializada em Steel Frame e residências de alto padrão. Site: lhmsteelframe.com.br. Instagram: @lhmengenharia. Vende via WhatsApp.
 Tom de voz: premium, técnico, sóbrio, confiante. NUNCA apelo a preço baixo nem promessas infantis. Diferenciais reais: engenheiro na obra todo dia, escopo fechado sem aditivos, ART por obra, conformidade ABNT, perfis de aço normatizados (0,95–1,20mm), memorial técnico.
-Escreva mensagens curtas para Telegram (texto puro, com emojis e quebras de linha, sem markdown de asteriscos). Seja direto e 100% acionável. NUNCA invente números — use apenas os dados fornecidos; se algo estiver "indisponível", diga isso.`;
+Escreva mensagens curtas para WhatsApp (texto puro, com emojis e quebras de linha, sem markdown de asteriscos). Seja direto e 100% acionável. NUNCA invente números — use apenas os dados fornecidos; se algo estiver "indisponível", diga isso.`;
 
 const INSTRUCOES = {
   briefing: `Monte o BRIEFING MATINAL de hoje (${hoje()}) com estas seções, cada uma curta:
@@ -246,7 +258,21 @@ function escreverTemplate(dados, { ig, ads, site }) {
   return partes.join("\n");
 }
 
-// ---- Envio ao Telegram ------------------------------------------------------
+// ---- Envio (WhatsApp via CallMeBot ou Telegram) -----------------------------
+
+async function enviarWhatsApp(texto) {
+  const msg = texto.length > 3500 ? texto.slice(0, 3490) + "\n…" : texto;
+  const url =
+    `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(CALLMEBOT_PHONE)}` +
+    `&text=${encodeURIComponent(msg)}&apikey=${encodeURIComponent(CALLMEBOT_APIKEY)}`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(40000) });
+  const body = await r.text();
+  if (/Message queued|Message Sent/i.test(body)) {
+    console.log("WhatsApp enviado com sucesso via CallMeBot.");
+  } else {
+    throw new Error("CallMeBot não confirmou envio. Resposta: " + body.slice(0, 300));
+  }
+}
 
 async function enviarTelegram(texto) {
   const msg = texto.length > 4000 ? texto.slice(0, 3990) + "\n…" : texto;
@@ -262,6 +288,11 @@ async function enviarTelegram(texto) {
   const j = await r.json();
   if (!j.ok) throw new Error("Telegram falhou: " + JSON.stringify(j));
   console.log("Telegram enviado com sucesso (message_id " + j.result.message_id + ").");
+}
+
+async function entregar(texto) {
+  if (CHANNEL === "telegram") return enviarTelegram(texto);
+  return enviarWhatsApp(texto);
 }
 
 // ---- Main -------------------------------------------------------------------
@@ -286,7 +317,7 @@ async function enviarTelegram(texto) {
     texto = escreverTemplate(dados, { ig, ads, site });
   }
 
-  await enviarTelegram(texto);
+  await entregar(texto);
 })().catch((e) => {
   console.error("ERRO FATAL:", e.message);
   process.exit(1);
