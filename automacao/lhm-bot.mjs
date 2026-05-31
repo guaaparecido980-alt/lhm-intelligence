@@ -2,7 +2,7 @@
 //  LHM Intelligence Bot — robô autônomo (GitHub Actions → WhatsApp)
 // -----------------------------------------------------------------------------
 //  Roda na nuvem do GitHub (internet liberada), puxa dados REAIS de marketing
-//  (Instagram, Meta Ads e Google Analytics do site) e entrega um relatório
+//  (Instagram, Google Ads e Google Analytics do site) e entrega um relatório
 //  no WhatsApp do dono via CallMeBot. Funciona mesmo com o PC desligado.
 //
 //  Modos (variável de ambiente MODE):
@@ -11,7 +11,7 @@
 //    raiox     → raio-x de performance (semanal)
 //
 //  Segredos lidos do ambiente (GitHub Secrets):
-//    WINDSOR_KEY_ADS    chave Windsor com Instagram + Meta Ads
+//    WINDSOR_KEY_ADS    chave Windsor com Instagram + Google Ads
 //    WINDSOR_KEY_GA     chave Windsor com Google Analytics do site
 //    ANTHROPIC_API_KEY  (OPCIONAL) liga a IA que escreve o texto
 //  Entrega no WhatsApp (CallMeBot) já vem configurada por padrão.
@@ -96,25 +96,50 @@ async function coletarInstagram() {
   };
 }
 
+// Nomes amigáveis por plataforma de anúncio (datasource do Windsor).
+const NOMES_ADS = {
+  google_ads: "Google Ads",
+  facebook: "Meta Ads (Facebook/Instagram)",
+  facebook_ads: "Meta Ads (Facebook/Instagram)",
+  instagram: "Meta Ads (Instagram)",
+  tiktok: "TikTok Ads",
+  bing: "Microsoft Ads",
+  linkedin: "LinkedIn Ads",
+};
+
 async function coletarAds() {
   if (!WINDSOR_KEY_ADS) return null;
+  // O endpoint /all traz TODAS as plataformas de anúncio conectadas nessa conta
+  // Windsor. Hoje só Google Ads; quando o Meta for conectado, aparece sozinho.
   const url =
     `https://connectors.windsor.ai/all?api_key=${WINDSOR_KEY_ADS}` +
-    `&date_preset=last_7d&fields=date,source,campaign,clicks,spend`;
+    `&date_preset=last_7d&fields=date,datasource,account_name,source,campaign,clicks,spend`;
   const rows = await getJSON(url, "ads");
   if (!rows || !rows.length) return null;
-  const onlyAds = rows.filter((r) => num(r.spend) > 0 || num(r.clicks) > 0);
-  const base = onlyAds.length ? onlyAds : rows;
-  const spend = base.reduce((t, r) => t + num(r.spend), 0);
-  const clicks = base.reduce((t, r) => t + num(r.clicks), 0);
-  const porCampanha = {};
+  // só linhas de anúncio (com gasto ou cliques) — ignora linhas orgânicas.
+  const base = rows.filter((r) => num(r.spend) > 0 || num(r.clicks) > 0);
+  if (!base.length) return null;
+
+  const porPlat = {};
   for (const r of base) {
+    const ds = r.datasource || "ads";
+    if (!porPlat[ds]) porPlat[ds] = { spend: 0, clicks: 0, camp: {} };
+    porPlat[ds].spend += num(r.spend);
+    porPlat[ds].clicks += num(r.clicks);
     const c = r.campaign || "—";
-    porCampanha[c] = (porCampanha[c] || 0) + num(r.clicks);
+    porPlat[ds].camp[c] = (porPlat[ds].camp[c] || 0) + num(r.clicks);
   }
-  const topCampanha =
-    Object.entries(porCampanha).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
-  return { spend, clicks, cpc: clicks ? spend / clicks : 0, topCampanha };
+
+  const plataformas = Object.entries(porPlat).map(([ds, v]) => ({
+    nome: NOMES_ADS[ds] || ds,
+    spend: v.spend,
+    clicks: v.clicks,
+    cpc: v.clicks ? v.spend / v.clicks : 0,
+    topCampanha: Object.entries(v.camp).sort((a, b) => b[1] - a[1])[0]?.[0] || "—",
+  }));
+  const totalSpend = plataformas.reduce((t, p) => t + p.spend, 0);
+  const totalClicks = plataformas.reduce((t, p) => t + p.clicks, 0);
+  return { plataformas, totalSpend, totalClicks };
 }
 
 async function coletarSite() {
@@ -153,12 +178,19 @@ function dossie({ ig, ads, site }) {
         `${ig.interacoes} interações, ${ig.followers} seguidores. Melhor dia: ${ig.melhorDia}.`
     );
   } else linhas.push("Instagram: dados indisponíveis.");
-  if (ads) {
-    linhas.push(
-      `Meta Ads (7d): investido ${brl(ads.spend)}, ${ads.clicks} cliques, ` +
-        `CPC ${brl(ads.cpc)}. Campanha destaque: ${ads.topCampanha}.`
-    );
-  } else linhas.push("Meta Ads: dados indisponíveis.");
+  if (ads && ads.plataformas.length) {
+    for (const p of ads.plataformas) {
+      linhas.push(
+        `${p.nome} (7d): investido ${brl(p.spend)}, ${p.clicks} cliques, ` +
+          `CPC ${brl(p.cpc)}. Campanha destaque: ${p.topCampanha}.`
+      );
+    }
+    if (ads.plataformas.length > 1) {
+      linhas.push(
+        `Total em anúncios (7d): ${brl(ads.totalSpend)} investidos, ${ads.totalClicks} cliques.`
+      );
+    }
+  } else linhas.push("Anúncios: dados indisponíveis (nenhuma campanha ativa).");
   if (site) {
     linhas.push(
       `Site lhmsteelframe.com.br (7d): ${site.totalusers} visitantes ` +
@@ -178,7 +210,7 @@ Escreva mensagens curtas para Telegram (texto puro, com emojis e quebras de linh
 const INSTRUCOES = {
   briefing: `Monte o BRIEFING MATINAL de hoje (${hoje()}) com estas seções, cada uma curta:
 ☀️ BRIEFING MATINAL — LHM Engenharia (${hoje()})
-📊 Seus números (7 dias): resuma Instagram, Meta Ads e Site a partir dos dados; termine com 1 frase interpretando.
+📊 Seus números (7 dias): resuma Instagram, anúncios (Google Ads e Meta Ads, se houver) e Site a partir dos dados; termine com 1 frase interpretando.
 📈 Oportunidade do dia: 1 ângulo acionável do mercado de Steel Frame/alto padrão + ação sugerida.
 📝 Post recomendado: tema + formato (Carrossel ou Reels) + CTA premium que leva ao WhatsApp.
 🔎 Insight de concorrência: 1 diferencial real da LHM.
@@ -192,7 +224,7 @@ const INSTRUCOES = {
   raiox: `Monte o RAIO-X DA SEMANA (até ${hoje()}):
 📊 RAIO-X DA SEMANA — LHM
 📈 Instagram: números + leitura.
-💸 Meta Ads: números + eficiência (CPC).
+💸 Anúncios (Google Ads e Meta Ads, se houver): números por plataforma + eficiência (CPC).
 🌐 Site: visitantes, sessões, top cidades, origens.
 🧭 3 ações pra próxima semana baseadas nos números (escalar/pausar/ajustar). Inclua ação sobre cidades se o litoral estiver sub-representado.`,
 };
