@@ -1,15 +1,32 @@
 // =============================================================================
-//  LHM Intelligence Bot — robô autônomo (GitHub Actions → WhatsApp/Telegram)
+//  LHM Intelligence Bot — robô autônomo (GitHub Actions → WhatsApp)
+// -----------------------------------------------------------------------------
+//  Roda na nuvem do GitHub (internet liberada), puxa dados REAIS de marketing
+//  (Instagram, Meta Ads e Google Analytics do site) e entrega um relatório
+//  no WhatsApp do dono via CallMeBot. Funciona mesmo com o PC desligado.
+//
+//  Modos (variável de ambiente MODE):
+//    briefing  → relatório matinal diário
+//    radar     → cidades quentes & concorrência (semanal)
+//    raiox     → raio-x de performance (semanal)
+//
+//  Segredos lidos do ambiente (GitHub Secrets):
+//    WINDSOR_KEY_ADS    chave Windsor com Instagram + Meta Ads
+//    WINDSOR_KEY_GA     chave Windsor com Google Analytics do site
+//    ANTHROPIC_API_KEY  (OPCIONAL) liga a IA que escreve o texto
+//  Entrega no WhatsApp (CallMeBot) já vem configurada por padrão.
 // =============================================================================
 
 const MODE = (process.env.MODE || "briefing").trim();
 
-// Canal de entrega: "whatsapp" ou "telegram".
+// Canal de entrega: "whatsapp" (padrão) ou "telegram".
 const CHANNEL = (process.env.CHANNEL || "whatsapp").trim().toLowerCase();
 
+// WhatsApp via CallMeBot (funciona no GitHub Actions, que tem internet liberada).
 const CALLMEBOT_PHONE = process.env.CALLMEBOT_PHONE || "554195374510";
 const CALLMEBOT_APIKEY = process.env.CALLMEBOT_APIKEY || "5122161";
 
+// Telegram (opcional, só se CHANNEL=telegram).
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
@@ -36,6 +53,7 @@ const hoje = () =>
     year: "numeric",
   });
 
+// Cidades que claramente são robôs/irrelevantes para a LHM.
 const CIDADES_ROBO = new Set([
   "Hyderabad", "Kurnool", "Warsaw", "Buenos Aires", "Encarnacion",
   "(not set)", "", "Mountain View", "Ashburn",
@@ -55,6 +73,8 @@ async function getJSON(url, label) {
     return null;
   }
 }
+
+// ---- Coleta de dados reais --------------------------------------------------
 
 async function coletarInstagram() {
   if (!WINDSOR_KEY_ADS) return null;
@@ -123,6 +143,8 @@ async function coletarSite() {
   return { totalusers, newusers, sessions, topCidades, topFonte };
 }
 
+// ---- Montagem do "dossiê" de dados pra IA ou pro template -------------------
+
 function dossie({ ig, ads, site }) {
   const linhas = [];
   if (ig) {
@@ -147,9 +169,11 @@ function dossie({ ig, ads, site }) {
   return linhas.join("\n");
 }
 
+// ---- Camada de IA (opcional, via Anthropic API) -----------------------------
+
 const SYSTEM = `Você é o estrategista de marketing da LHM Engenharia — construtora premium de Curitiba e do Litoral do Paraná (Caiobá, Guaratuba, Matinhos), especializada em Steel Frame e residências de alto padrão. Site: lhmsteelframe.com.br. Instagram: @lhmengenharia. Vende via WhatsApp.
 Tom de voz: premium, técnico, sóbrio, confiante. NUNCA apelo a preço baixo nem promessas infantis. Diferenciais reais: engenheiro na obra todo dia, escopo fechado sem aditivos, ART por obra, conformidade ABNT, perfis de aço normatizados (0,95–1,20mm), memorial técnico.
-Escreva mensagens curtas (texto puro, com emojis e quebras de linha, sem markdown de asteriscos). Seja direto e 100% acionável. NUNCA invente números — use apenas os dados fornecidos; se algo estiver "indisponível", diga isso.`;
+Escreva mensagens curtas para Telegram (texto puro, com emojis e quebras de linha, sem markdown de asteriscos). Seja direto e 100% acionável. NUNCA invente números — use apenas os dados fornecidos; se algo estiver "indisponível", diga isso.`;
 
 const INSTRUCOES = {
   briefing: `Monte o BRIEFING MATINAL de hoje (${hoje()}) com estas seções, cada uma curta:
@@ -162,7 +186,7 @@ const INSTRUCOES = {
   radar: `Monte o RADAR SEMANAL de crescimento (semana de ${hoje()}):
 🛰️ RADAR SEMANAL — LHM Engenharia
 🔥 Cidades quentes pra crescer: a partir das cidades dos visitantes do site e do seu conhecimento do mercado PR/litoral, aponte 2-3 cidades/regiões com potencial + ação para cada.
-🎯 Onde focar esta semana: recomendação de foco geográfico e de tema. Observe se o LITORAL está sub-representado vs Curitiba/RMC.
+🎯 Onde focar esta semana: recomendação de foco geográfico e de tema para anúncios e conteúdo. Observe se o LITORAL está sub-representado vs Curitiba/RMC.
 🥷 Concorrência: 1 movimento típico de concorrentes e o diferencial da LHM a destacar.
 📌 A aposta da semana: a recomendação estratégica nº1.`,
   raiox: `Monte o RAIO-X DA SEMANA (até ${hoje()}):
@@ -174,9 +198,11 @@ const INSTRUCOES = {
 };
 
 async function escreverComIA(dados) {
+  // Pesquisa na web ao vivo nos modos que dependem de mercado/tendências.
+  const usarWeb = MODE === "radar" || MODE === "briefing";
   const body = {
     model: "claude-sonnet-4-6",
-    max_tokens: 1200,
+    max_tokens: 1600,
     system: SYSTEM,
     messages: [
       {
@@ -184,10 +210,18 @@ async function escreverComIA(dados) {
         content:
           `DADOS REAIS DE HOJE:\n${dados}\n\n` +
           `${INSTRUCOES[MODE] || INSTRUCOES.briefing}\n\n` +
-          `Responda APENAS com a mensagem final pronta para envio, sem comentários extras.`,
+          (usarWeb
+            ? `Use a ferramenta de busca na web para trazer informações ATUAIS antes de escrever: ` +
+              `tendências de Steel Frame/alto padrão, o que concorrentes de Curitiba e litoral do PR estão comunicando, ` +
+              `e sinais de demanda por região. Priorize fontes recentes do Brasil/Paraná. `
+            : "") +
+          `Responda APENAS com a mensagem final pronta para envio (texto puro, sem citações no formato [1], sem comentários extras).`,
       },
     ],
   };
+  if (usarWeb) {
+    body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }];
+  }
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -196,15 +230,23 @@ async function escreverComIA(dados) {
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(120000),
   });
   if (!r.ok) {
     console.error(`Anthropic HTTP ${r.status}: ${await r.text()}`);
     return null;
   }
   const j = await r.json();
-  return j?.content?.[0]?.text?.trim() || null;
+  // Com busca na web, a resposta vem em vários blocos; junta só os de texto.
+  const texto = (j.content || [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+  return texto || null;
 }
+
+// ---- Template (fallback sem IA) ---------------------------------------------
 
 function escreverTemplate(dados, { ig, ads, site }) {
   const cab = {
@@ -232,6 +274,8 @@ function escreverTemplate(dados, { ig, ads, site }) {
   return partes.join("\n");
 }
 
+// ---- Envio (WhatsApp via CallMeBot ou Telegram) -----------------------------
+
 async function enviarWhatsApp(texto) {
   const msg = texto.length > 3500 ? texto.slice(0, 3490) + "\n…" : texto;
   const url =
@@ -247,25 +291,31 @@ async function enviarWhatsApp(texto) {
 }
 
 async function enviarTelegram(texto) {
-  const msg = texto.length > 4000 ? texto.slice(0, 3990) + "\n…" : texto;
-  const r = await fetch(
-    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: msg }),
-      signal: AbortSignal.timeout(30000),
-    }
-  );
-  const j = await r.json();
-  if (!j.ok) throw new Error("Telegram falhou: " + JSON.stringify(j));
-  console.log("Telegram enviado com sucesso (message_id " + j.result.message_id + ").");
+  const limite = 3900; // limite seguro do Telegram (máx 4096)
+  const partes = [];
+  for (let i = 0; i < texto.length; i += limite) partes.push(texto.slice(i, i + limite));
+  for (const parte of partes) {
+    const r = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: parte }),
+        signal: AbortSignal.timeout(30000),
+      }
+    );
+    const j = await r.json();
+    if (!j.ok) throw new Error("Telegram falhou: " + JSON.stringify(j));
+  }
+  console.log(`Telegram enviado com sucesso (${partes.length} parte(s)).`);
 }
 
 async function entregar(texto) {
   if (CHANNEL === "telegram") return enviarTelegram(texto);
   return enviarWhatsApp(texto);
 }
+
+// ---- Main -------------------------------------------------------------------
 
 (async () => {
   console.log(`== LHM Bot — modo: ${MODE} ==`);
