@@ -62,3 +62,12 @@ jobs:
           WINDSOR_KEY_GA: ${{ secrets.WINDSOR_KEY_GA }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: node automacao/lhm-bot.mjs
+
+      # 🚨 Monitor de saúde: se qualquer passo acima falhar, avisa no Telegram
+      # com o link direto pro erro. Só dispara em caso de falha.
+      - name: Avisar no Telegram se algo falhar
+        if: failure()
+        run: |
+          curl -sS -m 30 -G "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=🚨 LHM Intelligence: a rotina (${{ steps.mode.outputs.mode }}) FALHOU hoje e NÃO foi entregue. Veja o erro aqui: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
