@@ -53,6 +53,19 @@ const hoje = () =>
     year: "numeric",
   });
 
+// Data de hoje em formato AAAA-MM-DD no fuso de Brasília (pra comparar com as datas dos dados).
+const hojeISO = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+
+// Quantos dias atrás foi a data informada (string AAAA-MM-DD). null se inválida.
+function diasDesde(dataISO) {
+  if (!dataISO) return null;
+  const a = new Date(hojeISO() + "T00:00:00Z").getTime();
+  const b = new Date(String(dataISO).slice(0, 10) + "T00:00:00Z").getTime();
+  if (Number.isNaN(b)) return null;
+  return Math.round((a - b) / 86400000);
+}
+
 // Cidades que claramente são robôs/irrelevantes para a LHM.
 const CIDADES_ROBO = new Set([
   "Hyderabad", "Kurnool", "Warsaw", "Buenos Aires", "Encarnacion",
@@ -86,6 +99,7 @@ async function coletarInstagram() {
   const soma = (k) => rows.reduce((t, r) => t + num(r[k]), 0);
   const followers = rows.map((r) => num(r.followers_count)).filter(Boolean).pop() || 0;
   const melhorDia = rows.slice().sort((a, b) => num(b.reach) - num(a.reach))[0];
+  const datas = rows.map((r) => r.date).filter(Boolean).sort();
   return {
     username: rows[0]?.username || "lhmengenharia",
     followers,
@@ -93,6 +107,7 @@ async function coletarInstagram() {
     views: soma("views"),
     interacoes: soma("total_interactions"),
     melhorDia: melhorDia?.date || "—",
+    ultimaData: datas[datas.length - 1] || null,
   };
 }
 
@@ -139,7 +154,15 @@ async function coletarAds() {
   }));
   const totalSpend = plataformas.reduce((t, p) => t + p.spend, 0);
   const totalClicks = plataformas.reduce((t, p) => t + p.clicks, 0);
-  return { plataformas, totalSpend, totalClicks };
+  // Frescor e cobertura: só contam dias que de fato tiveram gasto/cliques.
+  const datasComGasto = base
+    .filter((r) => num(r.spend) > 0 || num(r.clicks) > 0)
+    .map((r) => r.date)
+    .filter(Boolean)
+    .sort();
+  const ultimaData = datasComGasto[datasComGasto.length - 1] || null;
+  const diasComDados = new Set(datasComGasto).size;
+  return { plataformas, totalSpend, totalClicks, ultimaData, diasComDados };
 }
 
 async function coletarSite() {
@@ -165,7 +188,49 @@ async function coletarSite() {
     .slice(0, 4)
     .map(([c]) => c);
   const topFonte = Object.entries(porFonte).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
-  return { totalusers, newusers, sessions, topCidades, topFonte };
+  const datas = rows.map((r) => r.date).filter(Boolean).sort();
+  return { totalusers, newusers, sessions, topCidades, topFonte, ultimaData: datas[datas.length - 1] || null };
+}
+
+// ---- Camada "Diretor": controle de qualidade ANTES de enviar ----------------
+// Não confia nos dados de olhos fechados: confere frescor (dado velho?) e
+// cobertura (semana incompleta?) e levanta avisos honestos. É o que impede
+// o robô de mandar um número parcial/desatualizado como se fosse a verdade.
+
+function controleQualidade({ ig, ads, site }) {
+  const avisos = [];
+
+  if (!ads) {
+    avisos.push("Anúncios: sem dados no período — NÃO afirmar desempenho de mídia paga.");
+  } else {
+    const d = diasDesde(ads.ultimaData);
+    if (d != null && d >= 2) {
+      avisos.push(
+        `Anúncios: o dado mais recente é de ${ads.ultimaData} (${d} dias atrás). ` +
+          `O conector pode estar atrasado OU a campanha pode estar pausada — os números NÃO refletem os últimos dias. Conferir no Google Ads.`
+      );
+    }
+    if (ads.diasComDados != null && ads.diasComDados < 5) {
+      avisos.push(
+        `Anúncios: apenas ${ads.diasComDados} dos últimos 7 dias têm gasto registrado. ` +
+          `O total é de uma semana INCOMPLETA — não comparar como se fosse 7 dias cheios.`
+      );
+    }
+  }
+
+  if (ig) {
+    const d = diasDesde(ig.ultimaData);
+    if (d != null && d >= 2)
+      avisos.push(`Instagram: dado mais recente de ${ig.ultimaData} (${d} dias atrás); pode estar desatualizado.`);
+  }
+
+  if (site) {
+    const d = diasDesde(site.ultimaData);
+    if (d != null && d >= 2)
+      avisos.push(`Site: dado mais recente de ${site.ultimaData} (${d} dias atrás); pode estar desatualizado.`);
+  }
+
+  return avisos;
 }
 
 // ---- Montagem do "dossiê" de dados pra IA ou pro template -------------------
@@ -359,14 +424,34 @@ async function entregar(texto) {
   const dados = dossie({ ig, ads, site });
   console.log("Dados coletados:\n" + dados);
 
+  // Diretor confere ANTES de escrever.
+  const avisos = controleQualidade({ ig, ads, site });
+  if (avisos.length) console.log("⚠️ Avisos do Diretor:\n- " + avisos.join("\n- "));
+
+  // A IA recebe os avisos junto com os dados e é obrigada a respeitá-los.
+  const dadosParaIA = avisos.length
+    ? dados +
+      "\n\nCONTROLE DE QUALIDADE (avisos do Diretor — INCORPORE com honestidade, " +
+      "NÃO esconda e NÃO apresente dado velho/parcial como se fosse atual):\n- " +
+      avisos.join("\n- ")
+    : dados;
+
   let texto = null;
   if (ANTHROPIC_API_KEY) {
     console.log("IA ligada — escrevendo com Claude…");
-    texto = await escreverComIA(dados);
+    texto = await escreverComIA(dadosParaIA);
   }
   if (!texto) {
     console.log("Usando template (sem IA ou IA falhou).");
     texto = escreverTemplate(dados, { ig, ads, site });
+  }
+
+  // Selo final do Diretor: garante que os avisos cheguem ao dono, mesmo que a
+  // IA os tenha resumido demais ou o template não os tenha incluído.
+  if (avisos.length) {
+    texto +=
+      "\n\n🛡️ CONFERIDO PELO DIRETOR — atenção:\n" +
+      avisos.map((a) => "• " + a).join("\n");
   }
 
   await entregar(texto);
