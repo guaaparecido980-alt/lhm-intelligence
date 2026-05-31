@@ -192,6 +192,61 @@ async function coletarSite() {
   return { totalusers, newusers, sessions, topCidades, topFonte, ultimaData: datas[datas.length - 1] || null };
 }
 
+// ---- Search Console: palavras-chave reais (SEO) -----------------------------
+// ATENÇÃO: o Search Console está conectado na MESMA key dos anúncios (d7b2),
+// NÃO na key do Google Analytics (6783). Por isso usa WINDSOR_KEY_ADS.
+
+async function coletarSEO() {
+  if (!WINDSOR_KEY_ADS) return null;
+  const url =
+    `https://connectors.windsor.ai/searchconsole?api_key=${WINDSOR_KEY_ADS}` +
+    `&date_preset=last_28d&fields=date,query,page,clicks,impressions,ctr,position`;
+  const rows = await getJSON(url, "searchconsole");
+  if (!rows || !rows.length) return null;
+  const m = {};
+  for (const r of rows) {
+    const q = (r.query || "(sem termo)").trim();
+    if (!m[q]) m[q] = { cl: 0, im: 0, pos: [] };
+    m[q].cl += num(r.clicks);
+    m[q].im += num(r.impressions);
+    if (num(r.position)) m[q].pos.push(num(r.position));
+  }
+  const termos = Object.entries(m).map(([q, v]) => ({
+    q,
+    clicks: v.cl,
+    impr: v.im,
+    ctr: v.im ? (v.cl / v.im) * 100 : 0,
+    pos: v.pos.length ? v.pos.reduce((a, b) => a + b, 0) / v.pos.length : null,
+  }));
+  const top = termos.slice().sort((a, b) => b.impr - a.impr).slice(0, 12);
+  // Oportunidade = gente buscando (impressões) mas você mal aparece (posição > 10).
+  const oportunidades = termos
+    .filter((t) => t.impr >= 5 && t.pos != null && t.pos > 10)
+    .sort((a, b) => b.impr - a.impr)
+    .slice(0, 6);
+  return {
+    top,
+    oportunidades,
+    totalClicks: termos.reduce((t, x) => t + x.clicks, 0),
+    totalImpr: termos.reduce((t, x) => t + x.impr, 0),
+  };
+}
+
+function dossieSEO(seo) {
+  if (!seo) return "Search Console: dados indisponíveis (verifique a conexão no Windsor).";
+  const l = [];
+  l.push(`Search Console (28 dias): ${seo.totalImpr} impressões e ${seo.totalClicks} cliques no site.`);
+  l.push("Termos que mais aparecem (termo | impressões | cliques | CTR | posição média):");
+  for (const t of seo.top)
+    l.push(`- "${t.q}": ${t.impr} | ${t.clicks} | ${t.ctr.toFixed(1)}% | pos ${t.pos != null ? t.pos.toFixed(1) : "—"}`);
+  if (seo.oportunidades.length) {
+    l.push("OPORTUNIDADES (gente buscando e você mal aparece — posição pior que 10):");
+    for (const t of seo.oportunidades)
+      l.push(`- "${t.q}": ${t.impr} impressões na posição ${t.pos.toFixed(1)}`);
+  }
+  return l.join("\n");
+}
+
 // ---- Camada "Diretor": controle de qualidade ANTES de enviar ----------------
 // Não confia nos dados de olhos fechados: confere frescor (dado velho?) e
 // cobertura (semana incompleta?) e levanta avisos honestos. É o que impede
@@ -292,11 +347,24 @@ const INSTRUCOES = {
 💸 Anúncios (Google Ads e Meta Ads, se houver): números por plataforma + eficiência (CPC).
 🌐 Site: visitantes, sessões, top cidades, origens.
 🧭 3 ações pra próxima semana baseadas nos números (escalar/pausar/ajustar). Inclua ação sobre cidades se o litoral estiver sub-representado.`,
+  seo: `Monte o RAIO-X DE PALAVRAS-CHAVE (Search Console, até ${hoje()}). Objetivo: preparar a PRÓXIMA campanha sabendo o que já funciona.
+🔑 RAIO-X DE PALAVRAS — LHM (SEO)
+📊 Resumo: total de impressões e cliques no site no período.
+🏆 Onde você já ganha: 2-3 termos com boa posição (top 5) — reforce com conteúdo.
+🎯 Oportunidades de ouro: termos com MUITA impressão e posição RUIM (página 2-3) — são clientes te procurando sem te achar. Priorize os de intenção local/compra (ex.: "casas steel frame curitiba"). Para cada um, diga o que fazer (página/conteúdo otimizado e/ou comprar a palavra na campanha paga).
+🏖️ Litoral: avalie se aparece algum termo de Guaratuba/Matinhos/Caiobá; se não, registre que o Litoral está invisível no orgânico.
+🧭 3 palavras que a PRÓXIMA campanha deveria comprar, com base no que já tem intenção e você ainda não domina.`,
+  chefe: `Você é o DIRETOR DE INTELIGÊNCIA da LHM — o chefe acima de todos os agentes. Recebeu os dados da semana inteira (Instagram, anúncios, site e palavras-chave do Google). Sua missão NÃO é repetir relatório: é CONSOLIDAR tudo em UMA mensagem estratégica curta e dar DIREÇÃO.
+🎩 DIREÇÃO DA SEMANA — LHM (${hoje()})
+📍 Onde você está: 2-3 linhas honestas sobre a situação real (o que está bom, o que está parado ou preocupa). Use os números reais; respeite os avisos de qualidade (NÃO trate dado velho/parcial como atual; NÃO invente).
+🎯 As 3 prioridades da semana: as 3 ações de MAIOR impacto pra LHM agora, EM ORDEM. Concretas e possíveis — lembre que NÃO há verba de anúncio no momento, então priorize o que é grátis/orgânico e preparação. Para cada uma, 1 linha de porquê.
+⚠️ O alerta: a coisa mais importante que o dono não pode ignorar esta semana.
+Seja direto, premium, sem enrolação. É a ÚNICA mensagem que o dono vai ler pra saber o que priorizar na semana.`,
 };
 
 async function escreverComIA(dados) {
   // Pesquisa na web ao vivo nos modos que dependem de mercado/tendências.
-  const usarWeb = MODE === "radar" || MODE === "briefing";
+  const usarWeb = MODE === "radar" || MODE === "briefing" || MODE === "seo" || MODE === "chefe";
   const body = {
     model: "claude-sonnet-4-6",
     max_tokens: 1600,
@@ -416,6 +484,58 @@ async function entregar(texto) {
 
 (async () => {
   console.log(`== LHM Bot — modo: ${MODE} ==`);
+
+  // Modo SEO: raio-x de palavras-chave do Search Console (prepara a próxima campanha).
+  if (MODE === "seo") {
+    const seo = await coletarSEO();
+    const dados = dossieSEO(seo);
+    console.log("Dados SEO:\n" + dados);
+    let texto = null;
+    if (ANTHROPIC_API_KEY) {
+      console.log("IA ligada — analisando palavras com Claude…");
+      texto = await escreverComIA(dados);
+    }
+    if (!texto) {
+      console.log("Usando template SEO (sem IA ou IA falhou).");
+      texto = `🔑 RAIO-X DE PALAVRAS — LHM (SEO)\n(${hoje()})\n\n${dados}\n\n— LHM Intelligence 🤖`;
+    }
+    await entregar(texto);
+    return;
+  }
+
+  // Modo CHEFE: o Diretor consolida a semana inteira em UMA direção estratégica.
+  if (MODE === "chefe") {
+    const [ig, ads, site, seo] = await Promise.all([
+      coletarInstagram(),
+      coletarAds(),
+      coletarSite(),
+      coletarSEO(),
+    ]);
+    const avisos = controleQualidade({ ig, ads, site });
+    const base = dossie({ ig, ads, site });
+    const seoTxt = dossieSEO(seo);
+    let dados = base + "\n\n" + seoTxt;
+    if (avisos.length)
+      dados +=
+        "\n\nCONTROLE DE QUALIDADE (avisos do Diretor — respeite, não trate dado velho como atual, não invente):\n- " +
+        avisos.join("\n- ");
+    console.log("Dados (chefe):\n" + dados);
+
+    let texto = null;
+    if (ANTHROPIC_API_KEY) {
+      console.log("IA ligada — Diretor consolidando a semana…");
+      texto = await escreverComIA(dados);
+    }
+    if (!texto) {
+      console.log("Usando template chefe (sem IA ou IA falhou).");
+      texto = `🎩 DIREÇÃO DA SEMANA — LHM\n(${hoje()})\n\n${base}\n\n${seoTxt}\n\n— LHM Intelligence 🤖`;
+    }
+    if (avisos.length)
+      texto += "\n\n🛡️ CONFERIDO PELO DIRETOR:\n" + avisos.map((a) => "• " + a).join("\n");
+    await entregar(texto);
+    return;
+  }
+
   const [ig, ads, site] = await Promise.all([
     coletarInstagram(),
     coletarAds(),
