@@ -17,6 +17,8 @@
 //  Entrega no WhatsApp (CallMeBot) já vem configurada por padrão.
 // =============================================================================
 
+import { readFile } from "node:fs/promises";
+
 const MODE = (process.env.MODE || "briefing").trim();
 
 // Canal de entrega: "whatsapp" (padrão) ou "telegram".
@@ -83,6 +85,40 @@ async function getJSON(url, label) {
     return Array.isArray(j) ? j : j.data || j.result || null;
   } catch (e) {
     console.error(`[${label}] erro: ${e.message}`);
+    return null;
+  }
+}
+
+// ---- Memória de longo prazo (diario.json) -----------------------------------
+// O robô NÃO é amnésico: toda manhã ele lê o diário com o que já foi publicado,
+// o que está pronto pra publicar e as pendências. Assim ele reconhece o que o
+// dono já executou, NÃO repete recomendações e avança pro próximo passo do plano.
+
+async function lerMemoria() {
+  try {
+    const raw = await readFile(new URL("./diario.json", import.meta.url), "utf8");
+    const d = JSON.parse(raw);
+    const L = ["MEMÓRIA DE LONGO PRAZO DA LHM (o robô tem memória — RESPEITE isto):"];
+    if (d.foco_estrategico) L.push(`Foco estratégico: ${d.foco_estrategico}`);
+    if (d.publicado_instagram?.length) {
+      L.push("Já PUBLICADO no Instagram (NUNCA recomendar republicar):");
+      for (const p of d.publicado_instagram) L.push(`- ${p.data}: ${p.tema}${p.link ? " (" + p.link + ")" : ""}`);
+    }
+    if (d.prontos_para_publicar?.length) {
+      L.push("PRONTOS para publicar (escolha daqui o PRÓXIMO carrossel):");
+      for (const t of d.prontos_para_publicar) L.push(`- ${t}`);
+    }
+    if (d.em_producao_pendente?.length) {
+      L.push("Pendências de produção (lembrar com sobriedade):");
+      for (const t of d.em_producao_pendente) L.push(`- ${t}`);
+    }
+    if (d.regras?.length) {
+      L.push("Regras de conteúdo:");
+      for (const r of d.regras) L.push(`- ${r}`);
+    }
+    return L.join("\n");
+  } catch (e) {
+    console.error("Memória (diario.json) indisponível: " + e.message);
     return null;
   }
 }
@@ -391,6 +427,9 @@ async function escreverComIA(dados) {
               `tendências de Steel Frame/alto padrão, o que concorrentes de Curitiba e litoral do PR estão comunicando, ` +
               `e sinais de demanda por região. Priorize fontes recentes do Brasil/Paraná. `
             : "") +
+          `IMPORTANTE — RESPEITE A MEMÓRIA DE LONGO PRAZO acima: reconheça brevemente o que já foi publicado no Instagram, ` +
+          `NUNCA recomende republicar algo que já está publicado, e direcione para o PRÓXIMO passo concreto do plano ` +
+          `(o próximo carrossel pronto a publicar, ou como amplificar o último post se ele acabou de subir). ` +
           `Responda APENAS com a mensagem final pronta para envio (texto puro, sem citações no formato [1], sem comentários extras).`,
       },
     ],
@@ -487,6 +526,11 @@ async function enviarTelegram(texto) {
 }
 
 async function entregar(texto) {
+  console.log(
+    "\n===== MENSAGEM FINAL (a que foi pro Telegram) =====\n" +
+      texto +
+      "\n===================================================\n"
+  );
   if (CHANNEL === "telegram") return enviarTelegram(texto);
   return enviarWhatsApp(texto);
 }
@@ -496,6 +540,12 @@ async function entregar(texto) {
 (async () => {
   console.log(`== LHM Bot — modo: ${MODE} ==`);
 
+  // Lê a memória de longo prazo uma vez e injeta nos dados que vão pra IA.
+  const memoria = await lerMemoria();
+  if (memoria) console.log("🧠 Memória carregada (diario.json).");
+  const comMemoria = (txt) =>
+    memoria ? `${memoria}\n\n========== DADOS DE HOJE ==========\n${txt}` : txt;
+
   // Modo SEO: raio-x de palavras-chave do Search Console (prepara a próxima campanha).
   if (MODE === "seo") {
     const seo = await coletarSEO();
@@ -504,7 +554,7 @@ async function entregar(texto) {
     let texto = null;
     if (ANTHROPIC_API_KEY) {
       console.log("IA ligada — analisando palavras com Claude…");
-      texto = await escreverComIA(dados);
+      texto = await escreverComIA(comMemoria(dados));
     }
     if (!texto) {
       console.log("Usando template SEO (sem IA ou IA falhou).");
@@ -535,7 +585,7 @@ async function entregar(texto) {
     let texto = null;
     if (ANTHROPIC_API_KEY) {
       console.log("IA ligada — Diretor consolidando a semana…");
-      texto = await escreverComIA(dados);
+      texto = await escreverComIA(comMemoria(dados));
     }
     if (!texto) {
       console.log("Usando template chefe (sem IA ou IA falhou).");
@@ -570,7 +620,7 @@ async function entregar(texto) {
   let texto = null;
   if (ANTHROPIC_API_KEY) {
     console.log("IA ligada — escrevendo com Claude…");
-    texto = await escreverComIA(dadosParaIA);
+    texto = await escreverComIA(comMemoria(dadosParaIA));
   }
   if (!texto) {
     console.log("Usando template (sem IA ou IA falhou).");
