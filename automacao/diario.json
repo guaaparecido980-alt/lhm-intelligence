@@ -1,0 +1,32 @@
+{
+  "atualizado": "2026-06-01",
+  "_nota": "MEMÓRIA DE LONGO PRAZO do robô LHM. O bot lê este arquivo TODA manhã antes de escrever o briefing, para não ser amnésico. Atualizar quando o user publicar um post novo (mover o tema para 'publicado_instagram') ou quando o plano mudar.",
+
+  "foco_estrategico": "Reativar o Instagram orgânico (@lhmengenharia tem poucos seguidores e quase nenhuma interação) publicando o banco de carrosséis já pronto, 1 por vez. O LITORAL (Guaratuba, Matinhos, Caiobá) é mercado-chave mas está sub-representado no site e nos anúncios — priorizar temas de litoral. Reforçar as palavras de ouro do Google onde a LHM aparece mal: 'steel frame curitiba' e 'casas steel frame curitiba'. Tudo puxa para conversa no WhatsApp.",
+
+  "publicado_instagram": [
+    { "data": "2026-06-01", "tema": "Casa de praia anti-maresia no Litoral (Steel Frame galvanizado)", "link": "https://www.instagram.com/p/DZDGx8-Fkki/" },
+    { "data": "anterior", "tema": "Fundação no Steel Frame", "link": "https://www.instagram.com/p/DZA3gNylk3R" }
+  ],
+
+  "prontos_para_publicar": [
+    "Steel Frame é mais caro que alvenaria? (objeção preço x valor)",
+    "Mitos do Steel Frame (parede oca, barulho, durabilidade)",
+    "O que é escopo fechado (protege o bolso do cliente)",
+    "ART + engenheiro na obra todos os dias",
+    "Casa de alto padrão em Curitiba: o que muda na engenharia"
+  ],
+
+  "em_producao_pendente": [
+    "Refazer 1 slide técnico (o ChatGPT erra texto miúdo em diagrama) dos carrosséis: '5 perguntas antes de contratar', 'Quanto tempo leva pra construir (cronograma)' e 'Casa mais fresca e silenciosa (desempenho ABNT)'.",
+    "Ainda criar os 3 últimos temas do plano: 'Construir no Litoral: o que a maioria erra', 'Do projeto à chave: etapas de uma obra LHM' e 'Por que Steel Frame valoriza na revenda'."
+  ],
+
+  "regras": [
+    "Publicar 1 carrossel por vez. SÓ carrosséis por enquanto — nada de Reels até a 1ª obra começar.",
+    "NUNCA recomendar republicar nada que já esteja em 'publicado_instagram'.",
+    "Reconhecer de forma sóbria e premium o que foi publicado recentemente (sem bajulação infantil).",
+    "Em toda recomendação de conteúdo, indicar o PRÓXIMO carrossel a publicar (escolhido de 'prontos_para_publicar') OU como amplificar o último post (stories marcando o feed, enviar no WhatsApp para contatos quentes).",
+    "Quando um post acabou de subir (publicado hoje), focar em AMPLIFICAR esse post, não em pedir outro no mesmo dia."
+  ]
+}
