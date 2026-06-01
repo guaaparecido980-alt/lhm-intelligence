@@ -3,23 +3,31 @@ name: LHM Intelligence Bot
 # Robô autônomo da LHM. Roda na nuvem do GitHub (internet liberada),
 # puxa dados reais e entrega no Telegram. Funciona com o PC desligado.
 #
-# Horários em UTC (Brasília = UTC-3):
-#   9 11 * * *  -> 08:09 BRT, todo dia   (Briefing Matinal)
-#   9 10 * * 1  -> 07:09 BRT, segunda    (Radar de Cidades & Concorrência)
-#   9 13 * * 3  -> 10:09 BRT, quarta     (Raio-X de Palavras-Chave / SEO)
-#   9 20 * * 5  -> 17:09 BRT, sexta      (Raio-X de Performance)
-#   9 21 * * 0  -> 18:09 BRT, domingo    (Direcao da Semana / Chefe consolidador)
-# IMPORTANTE: minuto fora do ":00" de propósito. O GitHub atrasa/descarta
-# tarefas agendadas que caem na "hora cheia" (todo mundo agenda 0 min). Sair
-# do :00 reduz muito a chance de o agendamento não rodar.
+# Horários em UTC (Brasília = UTC-3). Cada relatório tem 2 tentativas (se o
+# GitHub descartar uma, a próxima pega); o BRIEFING diário tem 3 (e em horas
+# diferentes), porque é o mais importante:
+#   BRIEFING diário:  9 11 / 39 11 / 9 12  -> 08:09 / 08:39 / 09:09 BRT
+#   RADAR  (segunda): 9 10 / 39 10          -> 07:09 / 07:39 BRT
+#   SEO    (quarta):  9 13 / 39 13          -> 10:09 / 10:39 BRT
+#   RAIO-X (sexta):   9 20 / 39 20          -> 17:09 / 17:39 BRT
+#   CHEFE  (domingo): 9 21 / 39 21          -> 18:09 / 18:39 BRT
+# IMPORTANTE: minuto fora do ":00" de propósito (o GitHub atrasa/descarta tarefas
+# que caem na hora cheia). Uma TRAVA ANTI-REPETIÇÃO (cache do dia) garante que,
+# mesmo com várias tentativas, você recebe só UMA mensagem de cada tipo por dia.
 
 on:
   schedule:
     - cron: "9 11 * * *"
+    - cron: "39 11 * * *"
+    - cron: "9 12 * * *"
     - cron: "9 10 * * 1"
+    - cron: "39 10 * * 1"
     - cron: "9 13 * * 3"
+    - cron: "39 13 * * 3"
     - cron: "9 20 * * 5"
+    - cron: "39 20 * * 5"
     - cron: "9 21 * * 0"
+    - cron: "39 21 * * 0"
   workflow_dispatch:
     inputs:
       mode:
@@ -36,23 +44,37 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Definir o modo conforme o horário
+      - name: Definir o modo e a data
         id: mode
         run: |
           MODE="briefing"
           case "${{ github.event.schedule }}" in
-            "9 10 * * 1") MODE="radar" ;;
-            "9 13 * * 3") MODE="seo" ;;
-            "9 20 * * 5") MODE="raiox" ;;
-            "9 21 * * 0") MODE="chefe" ;;
+            "9 10 * * 1"|"39 10 * * 1") MODE="radar" ;;
+            "9 13 * * 3"|"39 13 * * 3") MODE="seo" ;;
+            "9 20 * * 5"|"39 20 * * 5") MODE="raiox" ;;
+            "9 21 * * 0"|"39 21 * * 0") MODE="chefe" ;;
           esac
           if [ -n "${{ github.event.inputs.mode }}" ]; then
             MODE="${{ github.event.inputs.mode }}"
           fi
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "Modo selecionado: $MODE"
+          echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          echo "Modo selecionado: $MODE (data UTC $(date -u +%F))"
+
+      # 🔒 Trava anti-repetição: só nas execuções AGENDADAS. Guarda uma marca
+      # "já enviei MODE hoje". Se a marca já existe (cache-hit), o envio é pulado
+      # — assim as tentativas extras NÃO viram mensagens duplicadas. O disparo
+      # MANUAL (workflow_dispatch) ignora a trava e sempre envia.
+      - name: Trava anti-repetição (1 envio por dia por tipo)
+        id: trava
+        if: github.event_name == 'schedule'
+        uses: actions/cache@v4
+        with:
+          path: .ja-enviado
+          key: enviado-${{ steps.mode.outputs.mode }}-${{ steps.mode.outputs.date }}
 
       - name: Rodar o LHM Intelligence Bot
+        if: github.event_name != 'schedule' || steps.trava.outputs.cache-hit != 'true'
         env:
           MODE: ${{ steps.mode.outputs.mode }}
           CHANNEL: "telegram"
@@ -61,10 +83,18 @@ jobs:
           WINDSOR_KEY_ADS: ${{ secrets.WINDSOR_KEY_ADS }}
           WINDSOR_KEY_GA: ${{ secrets.WINDSOR_KEY_GA }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: node automacao/lhm-bot.mjs
+        run: |
+          node automacao/lhm-bot.mjs
+          # Só marca como "enviado hoje" se o passo acima deu certo (set -e aborta
+          # antes daqui se o envio falhar) — assim uma falha não bloqueia a retentativa.
+          echo "ok" > .ja-enviado
 
-      # 🚨 Monitor de saúde: se qualquer passo acima falhar, avisa no Telegram
-      # com o link direto pro erro. Só dispara em caso de falha.
+      - name: Ja tinha enviado hoje (tentativa extra ignorada)
+        if: github.event_name == 'schedule' && steps.trava.outputs.cache-hit == 'true'
+        run: echo "Relatorio '${{ steps.mode.outputs.mode }}' ja foi enviado hoje (${{ steps.mode.outputs.date }}). Tentativa extra ignorada para nao duplicar."
+
+      # 🚨 Monitor de saúde: se o envio falhar de verdade, avisa no Telegram com
+      # o link do erro. Só dispara em caso de falha real (não em tentativa pulada).
       - name: Avisar no Telegram se algo falhar
         if: failure()
         run: |
