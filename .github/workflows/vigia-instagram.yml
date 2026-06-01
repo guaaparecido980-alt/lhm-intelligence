@@ -1,0 +1,58 @@
+name: LHM Vigia Instagram
+
+# Plantão dos comentários do @lhmengenharia. Roda de hora em hora no horário
+# comercial (BRT) e avisa no Telegram quando aparece um comentário novo, com uma
+# sugestão de resposta. Não responde sozinho.
+#
+# Horários em UTC (Brasília = UTC-3): de hora em hora das 08:15 às 22:15 BRT.
+#   15 11-23 * * *  -> 08:15 .. 20:15 BRT
+#   15 0-1  * * *   -> 21:15 e 22:15 BRT
+# Minuto :15 de propósito (o GitHub atrasa/descarta tarefas na hora cheia).
+
+on:
+  schedule:
+    - cron: "15 11-23 * * *"
+    - cron: "15 0-1 * * *"
+  workflow_dispatch:
+
+# Garante que não rodem duas verificações ao mesmo tempo (estado consistente).
+concurrency:
+  group: vigia-instagram
+  cancel-in-progress: false
+
+jobs:
+  vigiar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # 🧠 Memória do vigia: restaura o estado (comentários já avisados) do cache.
+      # Salva sob uma chave nova a cada run e restaura a mais recente pelo prefixo.
+      - name: Restaurar memória do vigia
+        uses: actions/cache@v4
+        with:
+          path: .vigia-estado.json
+          key: vigia-estado-${{ github.run_id }}
+          restore-keys: |
+            vigia-estado-
+
+      - name: Rodar o Vigia de Instagram
+        env:
+          INSTAGRAM_TOKEN: ${{ secrets.INSTAGRAM_TOKEN }}
+          INSTAGRAM_API_VER: ${{ secrets.INSTAGRAM_API_VER }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node automacao/vigia-instagram.mjs
+
+      # 🚨 Se o vigia falhar de verdade (token errado, etc.), avisa no Telegram.
+      - name: Avisar no Telegram se falhar
+        if: failure()
+        run: |
+          curl -sS -m 30 -G "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=🚨 Vigia Instagram falhou. Veja: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
