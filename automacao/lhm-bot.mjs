@@ -131,8 +131,19 @@ async function coletarAds() {
     `&date_preset=last_7d&fields=date,datasource,account_name,source,campaign,clicks,spend`;
   const rows = await getJSON(url, "ads");
   if (!rows || !rows.length) return null;
-  // só linhas de anúncio (com gasto ou cliques) — ignora linhas orgânicas.
-  const base = rows.filter((r) => num(r.spend) > 0 || num(r.clicks) > 0);
+  // Fontes ORGÂNICAS que o endpoint /all às vezes devolve junto NÃO são mídia
+  // paga e não podem entrar no total de anúncios (o Search Console aparecia como
+  // "anúncio" de R$ 0,00, inflando os cliques). Filtramos por datasource.
+  const ORGANICO = new Set([
+    "searchconsole", "instagram", "instagram_public", "facebook_organic",
+    "google_my_business", "youtube", "linkedin_organic",
+  ]);
+  // só linhas de anúncio PAGO: datasource não-orgânico e com gasto ou cliques.
+  const base = rows.filter(
+    (r) =>
+      !ORGANICO.has(String(r.datasource || "").toLowerCase()) &&
+      (num(r.spend) > 0 || num(r.clicks) > 0)
+  );
   if (!base.length) return null;
 
   const porPlat = {};
